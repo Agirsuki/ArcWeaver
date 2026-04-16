@@ -1,0 +1,32 @@
+{
+  "candidate_weights": {
+    "ordered_token_prefix_similarity": 80.0,
+    "weighted_token_overlap": 36.0,
+    "smaller_numeric_first_difference": 20.0,
+    "exact_normalized_family": 100.0,
+    "same_series_core": 70.0,
+    "same_digit_tokens": 18.0,
+    "same_archive_type": 16.0,
+    "same_header_type": 14.0,
+    "same_directory": 10.0,
+    "same_size": 8.0,
+    "has_volume_index": 4.0,
+    "archive_header_mismatch_penalty": 12.0
+  },
+  "missing_volume_weights": {
+    "exact_normalized_family": 120.0,
+    "shared_token_overlap": 32.0,
+    "same_volume_index": 48.0
+  },
+  "root_priority_weights": {
+    "filename_is_root": 50.0,
+    "archive_signature": 30.0,
+    "archive_signature_zip": 10.0,
+    "missing_volume_feedback": 30.0,
+    "has_header_type": 10.0,
+    "filename_archive_without_header": 18.0
+  },
+  "thresholds": {
+    "bootstrap_min_score": 35.0
+  }
+}

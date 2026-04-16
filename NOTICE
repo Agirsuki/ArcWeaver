@@ -1,0 +1,12 @@
+ArcWeaver
+Copyright (c) 2025-2026 Rozx
+
+This project is an upgraded derivative based on the open-source
+`Complex-unzip-tool-v2` codebase and has been substantially modified for
+embedded workflow integration, intelligent disguised-archive detection,
+polyglot handling, multipart rescue, rollback, and workspace cleanup.
+
+Upstream inspiration/project:
+- Complex-Unzip-Tool (https://github.com/TR-Supowe/Complex-Unzip-Tool)
+
+This repository is distributed under the MIT License. See LICENSE.

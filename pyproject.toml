@@ -1,0 +1,43 @@
+[tool.poetry]
+name = "arcweaver"
+version = "3.0.0"
+description = "ArcWeaver: archive extraction for disguised files, multipart rescue, and recursive nested archives"
+authors = ["ArcWeaver Contributors"]
+readme = "README.md"
+packages = [
+    {include = "core"},
+    {include = "ui"},
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.15"
+send2trash = "^1.8.3"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+black = "^23.7.0"
+flake8 = "^6.0.0"
+mypy = "^1.5.0"
+pyinstaller = "^6.16.0"
+
+[tool.poetry.scripts]
+arcweaver = "core.cli:main"
+arcweaver-gui = "ui.desktop_app:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = ["E203", "W503"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
