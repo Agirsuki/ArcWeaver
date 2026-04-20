@@ -1,15 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-from PyInstaller.utils.win32 import winmanifest, winresource
-
-
-def _skip_windows_resource_update(*_args, **_kwargs):
-    return None
-
-
-winresource.remove_all_resources = _skip_windows_resource_update
-winmanifest.write_manifest_to_executable = _skip_windows_resource_update
-
 
 a = Analysis(
     ['launch_cli.py'],

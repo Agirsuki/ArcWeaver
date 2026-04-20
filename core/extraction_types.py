@@ -3,12 +3,25 @@ from __future__ import annotations
 """Core dataclasses shared by the extraction workflow."""
 
 from dataclasses import dataclass, field
-from typing import Literal, Optional
+from typing import Callable, Literal, Optional
 
 
 TaskStatus = Literal["success", "partial_success", "failed"]
 FileKind = Literal["archive", "non_archive", "unknown"]
 CandidateBucket = Literal["root", "unresolved", "password_error", "final"]
+DeepProbeDecision = Literal["continue", "skip_once", "skip_default"]
+
+
+@dataclass(slots=True)
+class ExtractedRootDecisionRequest:
+    """Prompt payload for deciding whether one extracted root should deep-probe."""
+
+    root_path: str
+    parent_archive_path: str
+    depth: int
+    file_count: int
+    dir_count: int
+    sample_entries: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -28,6 +41,15 @@ class EmbeddedExtractionConfig:
     force_probe_extensions: tuple[str, ...] = ("zip", "7z", "rar")
     multipart_bootstrap_count: int = 3
     multipart_max_candidates: int = 32
+    extracted_root_fast_track_file_threshold: int = 64
+    extracted_root_fast_track_dir_threshold: int = 12
+    extracted_root_threshold_mode: Literal["or", "and"] = "or"
+    extracted_root_preview_limit: int = 12
+    prompt_on_large_extracted_root: bool = False
+    live_process_log_handler: Optional[Callable[[ProcessLogEntry], None]] = None
+    extracted_root_decision_handler: Optional[
+        Callable[[ExtractedRootDecisionRequest], DeepProbeDecision]
+    ] = None
 
 
 @dataclass(slots=True)

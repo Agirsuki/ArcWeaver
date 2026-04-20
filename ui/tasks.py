@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 """Task list helpers used by the desktop application."""
 
@@ -113,6 +113,4 @@ def summarize_tasks(tasks: list[TaskItem]) -> str:
     """Build the compact summary text shown above the task table."""
 
     total = len(tasks)
-    archives = sum(task.archive_count for task in tasks)
-    selected = sum(1 for task in tasks if task.selected)
-    return f"任务 {total} | 压缩包 {archives} | 已勾选 {selected}"
+    return f"?? {total}"

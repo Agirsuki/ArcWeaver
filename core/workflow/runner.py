@@ -2,11 +2,16 @@ from __future__ import annotations
 
 """Workflow runner for recursive extraction."""
 
+import logging
 import os
 import shutil
 
 from ..extraction_config import normalize_embedded_config
-from ..extraction_types import EmbeddedExtractionConfig, EmbeddedExtractionResult
+from ..extraction_types import (
+    EmbeddedExtractionConfig,
+    EmbeddedExtractionResult,
+    ProcessLogEntry,
+)
 from ..multipart.solver import solve_pending_multipart
 from ..path_ops import task_roots_from_inputs
 from .publish import publish_final_outputs
@@ -43,6 +48,8 @@ def process_downloads(
         scan_roots=list(task_roots),
         max_depth=normalized_config.max_depth,
     )
+    if normalized_config.live_process_log_handler is not None:
+        state._log_handler._live_handler = _LiveLogForwarder(normalized_config.live_process_log_handler)
 
     while True:
         files = _collect_round_files(state)
@@ -89,6 +96,24 @@ def process_downloads(
         process_log=list(state.process_log),
         discovered_passwords=[],
     )
+
+
+class _LiveLogForwarder(logging.Handler):
+    """Forward pipeline log records to a callback."""
+
+    def __init__(self, callback):
+        super().__init__(level=logging.DEBUG)
+        self._callback = callback
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            message = record.getMessage()
+        except Exception:
+            message = str(record.msg)
+        try:
+            self._callback(ProcessLogEntry(level=record.levelname, message=message))
+        except Exception:
+            pass
 
 
 def _prepare_working_environment(working_dir: str) -> None:

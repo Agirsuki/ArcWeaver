@@ -14,16 +14,28 @@ LOGGER_NAME = "complex_unzip.pipeline"
 class PipelineLogHandler(logging.Handler):
     """Capture pipeline log records into structured in-memory entries."""
 
-    def __init__(self, sink: list[ProcessLogEntry]):
+    def __init__(
+        self,
+        sink: list[ProcessLogEntry],
+        live_handler: logging.Handler | None = None,
+    ):
         super().__init__(level=logging.DEBUG)
         self._sink = sink
+        self._live_handler = live_handler
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
             message = record.getMessage()
         except Exception:
             message = str(record.msg)
-        self._sink.append(ProcessLogEntry(level=record.levelname, message=message))
+        entry = ProcessLogEntry(level=record.levelname, message=message)
+        self._sink.append(entry)
+        if self._live_handler is None:
+            return
+        try:
+            self._live_handler.emit(record)
+        except Exception:
+            pass
 
 
 @dataclass(slots=True)
@@ -49,6 +61,8 @@ class PipelineState:
     process_log: list[ProcessLogEntry] = field(default_factory=list)
     staged_final_paths: list[str] = field(default_factory=list)
     extraction_root_depths: dict[str, int] = field(default_factory=dict)
+    skipped_extracted_roots: set[str] = field(default_factory=set)
+    default_skip_deep_probe: bool = False
     extraction_count: int = 0
     logger: logging.Logger = field(init=False, repr=False)
     _log_handler: PipelineLogHandler = field(init=False, repr=False)
@@ -128,4 +142,10 @@ class PipelineState:
             root
             for root in ordered_roots
             if self.extraction_root_depths.get(root, 1) <= self.max_depth
+            and root not in self.skipped_extracted_roots
         ]
+
+    def should_skip_recursive_scan_for_root(self, root_path: str) -> bool:
+        """Return whether one extracted root should be excluded from later scanning."""
+
+        return os.path.abspath(root_path) in self.skipped_extracted_roots

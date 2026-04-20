@@ -2,22 +2,12 @@
 
 from pathlib import Path
 
-from PyInstaller.utils.win32 import winmanifest, winresource
-
 
 project_root = (
     Path(__file__).resolve().parent
     if "__file__" in globals()
     else Path.cwd().resolve()
 )
-
-
-def _skip_windows_resource_update(*_args, **_kwargs):
-    return None
-
-
-winresource.remove_all_resources = _skip_windows_resource_update
-winmanifest.write_manifest_to_executable = _skip_windows_resource_update
 
 datas = [
     (str(project_root / "core" / "config" / "multipart_scoring.json"), "core/config"),

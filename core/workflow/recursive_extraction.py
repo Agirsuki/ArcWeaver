@@ -8,7 +8,11 @@ import shutil
 from uuid import uuid4
 
 from ..archive_backend import ArchiveAttemptResult, extract_archive
-from ..extraction_types import EmbeddedExtractionConfig, FileEvidence
+from ..extraction_types import (
+    EmbeddedExtractionConfig,
+    ExtractedRootDecisionRequest,
+    FileEvidence,
+)
 from ..polyglot import carve_hidden_archive
 from ..signatures import is_archive_kind
 from .recursive_evidence import build_file_evidence
@@ -79,7 +83,17 @@ def _process_file_for_recursive_extraction(
             label="direct",
         )
         if direct_result.success:
-            mark_success(state, evidence, direct_result)
+            mark_success(
+                state,
+                evidence,
+                direct_result,
+                skip_recursive_scan=_should_skip_recursive_scan_for_extracted_root(
+                    direct_result.output_dir,
+                    state=state,
+                    parent_path=evidence.source_path,
+                    config=config,
+                ),
+            )
             return True
         attempt_results.append(direct_result)
         if direct_result.status == "password_error":
@@ -104,14 +118,27 @@ def _process_file_for_recursive_extraction(
             )
             _remove_if_exists(header_alias_path)
             if header_result.success:
-                mark_success(state, evidence, header_result)
+                mark_success(
+                    state,
+                    evidence,
+                    header_result,
+                    skip_recursive_scan=_should_skip_recursive_scan_for_extracted_root(
+                        header_result.output_dir,
+                        state=state,
+                        parent_path=evidence.source_path,
+                        config=config,
+                    ),
+                )
                 return True
             attempt_results.append(header_result)
             if header_result.status == "password_error":
                 mark_password_failure(state, evidence, header_result)
                 return False
 
-    if evidence.file_kind == "non_archive" and config.detect_polyglot_archives:
+    if (
+        evidence.file_kind == "non_archive"
+        and config.detect_polyglot_archives
+    ):
         polyglot_hit = carve_hidden_archive(
             evidence.source_path,
             os.path.join(state.working_dir, "polyglot"),
@@ -127,7 +154,17 @@ def _process_file_for_recursive_extraction(
                 label=f"polyglot:{polyglot_hit.archive_type}",
             )
             if polyglot_result.success:
-                mark_success(state, evidence, polyglot_result)
+                mark_success(
+                    state,
+                    evidence,
+                    polyglot_result,
+                    skip_recursive_scan=_should_skip_recursive_scan_for_extracted_root(
+                        polyglot_result.output_dir,
+                        state=state,
+                        parent_path=evidence.source_path,
+                        config=config,
+                    ),
+                )
                 return True
             attempt_results.append(polyglot_result)
             if polyglot_result.status == "password_error":
@@ -153,7 +190,17 @@ def _process_file_for_recursive_extraction(
             )
             _remove_if_exists(forced_alias_path)
             if forced_result.success:
-                mark_success(state, evidence, forced_result)
+                mark_success(
+                    state,
+                    evidence,
+                    forced_result,
+                    skip_recursive_scan=_should_skip_recursive_scan_for_extracted_root(
+                        forced_result.output_dir,
+                        state=state,
+                        parent_path=evidence.source_path,
+                        config=config,
+                    ),
+                )
                 return True
             attempt_results.append(forced_result)
             if forced_result.status == "password_error":
@@ -250,3 +297,92 @@ def _remove_if_exists(path: str) -> None:
             os.remove(path)
     except OSError:
         pass
+
+
+def _should_skip_recursive_scan_for_extracted_root(
+    extracted_root: str,
+    *,
+    state: PipelineState,
+    parent_path: str,
+    config: EmbeddedExtractionConfig,
+) -> bool:
+    """Return whether one extracted root should skip later recursive scanning."""
+
+    file_count = 0
+    dir_count = 0
+    sample_entries: list[str] = []
+    preview_limit = max(0, int(config.extracted_root_preview_limit))
+
+    try:
+        for current_root, dirs, files in os.walk(extracted_root):
+            dir_count += len(dirs)
+            file_count += len(files)
+            if len(sample_entries) < preview_limit:
+                sample_entries.extend(
+                    os.path.relpath(os.path.join(current_root, name), extracted_root)
+                    for name in sorted(dirs + files)[: max(0, preview_limit - len(sample_entries))]
+                )
+    except OSError:
+        return False
+
+    file_hit = file_count > config.extracted_root_fast_track_file_threshold
+    dir_hit = dir_count > config.extracted_root_fast_track_dir_threshold
+    threshold_hit = (
+        file_hit and dir_hit
+        if config.extracted_root_threshold_mode == "and"
+        else file_hit or dir_hit
+    )
+    if not threshold_hit:
+        return False
+
+    return _resolve_large_root_decision(
+        state=state,
+        config=config,
+        extracted_root=extracted_root,
+        parent_path=parent_path,
+        file_count=file_count,
+        dir_count=dir_count,
+        sample_entries=sample_entries[:preview_limit],
+    )
+
+
+def _resolve_large_root_decision(
+    *,
+    state: PipelineState,
+    config: EmbeddedExtractionConfig,
+    extracted_root: str,
+    parent_path: str,
+    file_count: int,
+    dir_count: int,
+    sample_entries: list[str],
+) -> bool:
+    """Resolve whether one large extracted root should skip later recursive scanning."""
+
+    if state.default_skip_deep_probe:
+        state.log_info(f"[recursive] default skip recursive scan for extracted root: {extracted_root}")
+        return True
+
+    if not config.prompt_on_large_extracted_root or config.extracted_root_decision_handler is None:
+        state.log_info(f"[recursive] auto skip recursive scan for large extracted root: {extracted_root}")
+        return True
+
+    request = ExtractedRootDecisionRequest(
+        root_path=extracted_root,
+        parent_archive_path=parent_path,
+        depth=state.depth_for_path(parent_path) + 1,
+        file_count=file_count,
+        dir_count=dir_count,
+        sample_entries=list(sample_entries),
+    )
+    decision = config.extracted_root_decision_handler(request)
+
+    if decision == "continue":
+        state.log_info(f"[recursive] continue recursive scan for extracted root: {extracted_root}")
+        return False
+    if decision == "skip_default":
+        state.default_skip_deep_probe = True
+        state.log_info(f"[recursive] default skip recursive scan enabled from: {extracted_root}")
+        return True
+
+    state.log_info(f"[recursive] skip recursive scan once for extracted root: {extracted_root}")
+    return True

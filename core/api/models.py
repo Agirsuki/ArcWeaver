@@ -3,8 +3,14 @@ from __future__ import annotations
 """Public data models used by the task API."""
 
 from dataclasses import dataclass, field
+from typing import Callable
 
-from ..extraction_types import EmbeddedExtractionResult
+from ..extraction_types import (
+    DeepProbeDecision,
+    EmbeddedExtractionResult,
+    ExtractedRootDecisionRequest,
+    ProcessLogEntry,
+)
 
 
 @dataclass(slots=True)
@@ -24,6 +30,15 @@ class ExtractOptions:
     output_dir_name: str = "unzipped"
     working_dir_name: str = ".complex_unzip_work"
     workspace_suffix_length: int = 6
+    prompt_on_large_extracted_root: bool = False
+    extracted_root_fast_track_file_threshold: int = 64
+    extracted_root_fast_track_dir_threshold: int = 12
+    extracted_root_threshold_mode: str = "or"
+    extracted_root_preview_limit: int = 12
+    live_process_log_handler: Callable[[ProcessLogEntry], None] | None = None
+    extracted_root_decision_handler: Callable[
+        [ExtractedRootDecisionRequest], DeepProbeDecision
+    ] | None = None
 
 
 @dataclass(slots=True)

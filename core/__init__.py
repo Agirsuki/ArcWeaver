@@ -22,16 +22,20 @@ from .api import (
 from .extraction_config import default_embedded_config, normalize_embedded_config
 from .extraction_types import (
     AttemptRecord,
+    DeepProbeDecision,
     EmbeddedExtractionConfig,
     EmbeddedExtractionResult,
     ExtractionGroupResult,
+    ExtractedRootDecisionRequest,
     FileEvidence,
+    ProcessLogEntry,
     WorkspacePromotionResult,
 )
 from .workflow import process_downloads, promote_output_dir_contents
 
 __all__ = [
     "AttemptRecord",
+    "DeepProbeDecision",
     "DeleteOptions",
     "DeleteRequest",
     "DeleteResult",
@@ -42,7 +46,9 @@ __all__ = [
     "ExtractTaskPlan",
     "ExtractTaskResult",
     "ExtractionGroupResult",
+    "ExtractedRootDecisionRequest",
     "FileEvidence",
+    "ProcessLogEntry",
     "WorkspacePromotionResult",
     "build_delete_request",
     "default_delete_options",

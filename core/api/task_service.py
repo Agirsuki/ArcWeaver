@@ -90,4 +90,11 @@ def _build_embedded_config(
         use_recycle_bin=options.use_recycle_bin,
         save_passwords=options.save_passwords,
         seven_zip_path=options.seven_zip_path,
+        extracted_root_fast_track_file_threshold=options.extracted_root_fast_track_file_threshold,
+        extracted_root_fast_track_dir_threshold=options.extracted_root_fast_track_dir_threshold,
+        extracted_root_preview_limit=options.extracted_root_preview_limit,
+        prompt_on_large_extracted_root=options.prompt_on_large_extracted_root,
+        live_process_log_handler=options.live_process_log_handler,
+        extracted_root_threshold_mode=options.extracted_root_threshold_mode,
+        extracted_root_decision_handler=options.extracted_root_decision_handler,
     )

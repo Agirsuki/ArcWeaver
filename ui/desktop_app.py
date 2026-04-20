@@ -1,8 +1,9 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 """Tk desktop application for running extraction tasks interactively."""
 
 from datetime import datetime
+from functools import partial
 import os
 import queue
 import threading
@@ -16,8 +17,11 @@ from tkinter.scrolledtext import ScrolledText
 from core import (
     DeleteRequest,
     DeleteResult,
+    DeepProbeDecision,
     EmbeddedExtractionResult,
+    ProcessLogEntry,
     ExtractTaskResult,
+    ExtractedRootDecisionRequest,
     extract_task,
 )
 from core.workspace import build_task_plan
@@ -42,8 +46,8 @@ class DesktopExtractorApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("ArcWeaver")
-        self.root.geometry("1200x860")
-        self.root.minsize(1040, 740)
+        self.root.geometry("1120x760")
+        self.root.minsize(980, 680)
 
         self._tasks: list[TaskItem] = []
         self._event_queue: queue.Queue[tuple[str, object]] = queue.Queue()
@@ -52,6 +56,8 @@ class DesktopExtractorApp:
         self._run_done = 0
         self._run_warnings: list[str] = []
         self._active_run_settings: UiSettings | None = None
+        self._current_decision_event: threading.Event | None = None
+        self._current_decision_value: DeepProbeDecision | None = None
         self._defaults = default_ui_settings()
         self.verbose_log_var = tk.BooleanVar(value=True)
 
@@ -87,6 +93,9 @@ class DesktopExtractorApp:
         style.configure("Card.TLabelframe", background="#ffffff", borderwidth=1, relief="solid")
         style.configure("Card.TLabelframe.Label", background="#ffffff", foreground="#0f172a")
         style.configure("TLabel", background="#eef2f6", foreground="#0f172a")
+        style.configure("TButton", padding=(5, 1))
+        style.configure("TCheckbutton", padding=(0, 1))
+        style.configure("TRadiobutton", padding=(0, 1))
         style.configure("Primary.TButton", background="#1d4ed8", foreground="#ffffff")
         style.configure("Hint.TLabel", background="#eef2f6", foreground="#475569")
         style.configure("Value.TLabel", background="#eef2f6", foreground="#0f172a")
@@ -94,7 +103,7 @@ class DesktopExtractorApp:
     def _build_ui(self) -> None:
         """Create the full window layout."""
 
-        wrap = ttk.Frame(self.root, padding=12)
+        wrap = ttk.Frame(self.root, padding=8)
         wrap.pack(fill=BOTH, expand=True)
 
         self._build_input_card(wrap)
@@ -106,8 +115,8 @@ class DesktopExtractorApp:
     def _build_input_card(self, parent: ttk.Frame) -> None:
         """Build the task input area for file and directory tasks."""
 
-        card = ttk.LabelFrame(parent, text="任务输入", style="Card.TLabelframe", padding=10)
-        card.pack(fill=X, pady=(0, 10))
+        card = ttk.LabelFrame(parent, text="任务输入", style="Card.TLabelframe", padding=8)
+        card.pack(fill=X, pady=(0, 6))
 
         self.mode_var = tk.StringVar(value="single")
         self.single_path_var = tk.StringVar()
@@ -132,7 +141,7 @@ class DesktopExtractorApp:
         ).pack(side=LEFT)
 
         self.single_row = ttk.Frame(card)
-        self.single_row.pack(fill=X, pady=(8, 0))
+        self.single_row.pack(fill=X, pady=(5, 0))
         ttk.Entry(self.single_row, textvariable=self.single_path_var).pack(side=LEFT, fill=X, expand=True)
         ttk.Button(
             self.single_row,
@@ -156,106 +165,112 @@ class DesktopExtractorApp:
             command=self._pick_directory_task,
         ).pack(side=LEFT, padx=(8, 0))
 
-        ttk.Label(card, textvariable=self.drop_hint, style="Hint.TLabel").pack(anchor="w", pady=(8, 0))
+        ttk.Label(card, textvariable=self.drop_hint, style="Hint.TLabel").pack(anchor="w", pady=(5, 0))
         self._on_mode_change()
 
     def _build_task_card(self, parent: ttk.Frame) -> None:
         """Build the task table and task selection controls."""
 
-        card = ttk.LabelFrame(parent, text="任务列表", style="Card.TLabelframe", padding=10)
-        card.pack(fill=BOTH, expand=True, pady=(0, 10))
+        card = ttk.LabelFrame(parent, text="任务列表", style="Card.TLabelframe", padding=8)
+        card.pack(fill=BOTH, expand=True, pady=(0, 6))
 
         top = ttk.Frame(card)
-        top.pack(fill=X, pady=(0, 8))
-        ttk.Button(top, text="全选", command=self._select_all).pack(side=LEFT)
-        ttk.Button(top, text="全不选", command=self._select_none).pack(side=LEFT, padx=(6, 0))
-        ttk.Button(top, text="反选", command=self._invert_select).pack(side=LEFT, padx=(6, 0))
-        ttk.Button(top, text="清空", command=self._clear_tasks).pack(side=LEFT, padx=(6, 0))
-        self.task_stats = tk.StringVar(value="任务 0 | 压缩包 0 | 已勾选 0")
+        top.pack(fill=X, pady=(0, 5))
+        ttk.Button(top, text="清空", command=self._clear_tasks).pack(side=LEFT)
+        self.task_stats = tk.StringVar(value="任务 0")
         ttk.Label(top, textvariable=self.task_stats, style="Hint.TLabel").pack(side=RIGHT)
 
         tree_wrap = ttk.Frame(card)
         tree_wrap.pack(fill=BOTH, expand=True)
         self.task_tree = ttk.Treeview(
             tree_wrap,
-            columns=("on", "type", "archives", "path"),
+            columns=("on", "type", "path"),
             show="headings",
-            height=10,
+            height=4,
         )
         self.task_tree.heading("on", text="参与")
         self.task_tree.heading("type", text="类型")
-        self.task_tree.heading("archives", text="压缩包数")
         self.task_tree.heading("path", text="任务标识")
         self.task_tree.column("on", width=60, anchor="center")
-        self.task_tree.column("type", width=80, anchor="center")
-        self.task_tree.column("archives", width=90, anchor="center")
-        self.task_tree.column("path", width=860)
+        self.task_tree.column("type", width=60, anchor="center")
+        self.task_tree.column("path", width=980)
         self.task_tree.pack(side=LEFT, fill=BOTH, expand=True)
         self.task_tree.bind("<Double-1>", self._toggle_task)
 
-        scrollbar = ttk.Scrollbar(tree_wrap, orient="vertical", command=self.task_tree.yview)
+        scrollbar = tk.Scrollbar(tree_wrap, orient="vertical", command=self.task_tree.yview, width=14)
         scrollbar.pack(side=RIGHT, fill=Y)
         self.task_tree.configure(yscrollcommand=scrollbar.set)
 
     def _build_runtime_card(self, parent: ttk.Frame) -> None:
         """Build runtime settings, cleanup options, and password input."""
 
-        card = ttk.LabelFrame(parent, text="运行设置", style="Card.TLabelframe", padding=10)
-        card.pack(fill=X, pady=(0, 10))
+        card = ttk.LabelFrame(parent, text="运行设置", style="Card.TLabelframe", padding=8)
+        card.pack(fill=X, pady=(0, 6))
 
         self.keep_source_var = tk.BooleanVar(value=self._defaults.keep_source)
         self.detect_polyglot_var = tk.BooleanVar(value=self._defaults.detect_polyglot)
         self.cleanup_var = tk.BooleanVar(value=self._defaults.cleanup)
         self.promote_output_var = tk.BooleanVar(value=self._defaults.promote_output)
         self.recycle_var = tk.BooleanVar(value=self._defaults.recycle)
+        self.prompt_large_root_var = tk.BooleanVar(value=self._defaults.prompt_large_extracted_root)
+        self.large_root_file_threshold_var = tk.IntVar(value=self._defaults.large_root_file_threshold)
+        self.large_root_dir_threshold_var = tk.IntVar(value=self._defaults.large_root_dir_threshold)
+        self.large_root_preview_limit_var = tk.IntVar(value=self._defaults.large_root_preview_limit)
+        self.large_root_threshold_mode_var = tk.StringVar(
+            value="并且" if self._defaults.large_root_threshold_mode == "and" else "或者"
+        )
 
         self.keep_source_state = tk.StringVar()
         self.detect_polyglot_state = tk.StringVar()
         self.cleanup_state = tk.StringVar()
         self.promote_output_state = tk.StringVar()
         self.recycle_state = tk.StringVar()
+        self.prompt_large_root_state = tk.StringVar()
 
         row = ttk.Frame(card)
         row.pack(fill=X)
         ttk.Checkbutton(row, text="保留源压缩包", variable=self.keep_source_var).pack(side=LEFT)
-        ttk.Label(row, textvariable=self.keep_source_state, style="Value.TLabel").pack(side=LEFT, padx=(4, 12))
-        ttk.Checkbutton(row, text="检测 Polyglot", variable=self.detect_polyglot_var).pack(side=LEFT)
-        ttk.Label(row, textvariable=self.detect_polyglot_state, style="Value.TLabel").pack(side=LEFT, padx=(4, 12))
-        ttk.Checkbutton(row, text="完成后清理工作目录", variable=self.cleanup_var).pack(side=LEFT)
-        ttk.Label(row, textvariable=self.cleanup_state, style="Value.TLabel").pack(side=LEFT, padx=(4, 12))
+        ttk.Label(row, textvariable=self.keep_source_state, style="Value.TLabel").pack(side=LEFT, padx=(4, 10))
+        ttk.Checkbutton(row, text="检测 Polyglot", variable=self.detect_polyglot_var).pack(side=LEFT, padx=(10, 0))
+        ttk.Label(row, textvariable=self.detect_polyglot_state, style="Value.TLabel").pack(side=LEFT, padx=(4, 10))
+        ttk.Checkbutton(row, text="完成后清理工作目录", variable=self.cleanup_var).pack(side=LEFT, padx=(10, 0))
+        ttk.Label(row, textvariable=self.cleanup_state, style="Value.TLabel").pack(side=LEFT, padx=(4, 10))
+        ttk.Checkbutton(row, text="提取结果到工作目录", variable=self.promote_output_var).pack(side=LEFT, padx=(10, 0))
+        ttk.Label(row, textvariable=self.promote_output_state, style="Value.TLabel").pack(side=LEFT, padx=(4, 10))
+        ttk.Checkbutton(row, text="使用系统回收站", variable=self.recycle_var).pack(side=LEFT, padx=(10, 0))
+        ttk.Label(row, textvariable=self.recycle_state, style="Value.TLabel").pack(side=LEFT, padx=(4, 0))
 
         row2 = ttk.Frame(card)
-        row2.pack(fill=X, pady=(8, 0))
-        ttk.Checkbutton(
+        row2.pack(fill=X, pady=(4, 0))
+        ttk.Checkbutton(row2, text="手动确认大目录", variable=self.prompt_large_root_var).pack(side=LEFT)
+        ttk.Label(row2, textvariable=self.prompt_large_root_state, style="Value.TLabel").pack(side=LEFT, padx=(4, 8))
+        ttk.Label(row2, text="当文件数量超过").pack(side=LEFT)
+        ttk.Spinbox(row2, from_=1, to=1000000, width=5, textvariable=self.large_root_file_threshold_var).pack(side=LEFT, padx=(4, 4))
+        threshold_mode = ttk.Combobox(
             row2,
-            text="提取结果到工作目录",
-            variable=self.promote_output_var,
-        ).pack(side=LEFT)
-        ttk.Label(row2, textvariable=self.promote_output_state, style="Value.TLabel").pack(
-            side=LEFT,
-            padx=(4, 12),
+            width=4,
+            state="readonly",
+            values=("并且", "或者"),
+            textvariable=self.large_root_threshold_mode_var,
         )
-        ttk.Checkbutton(row2, text="使用系统回收站", variable=self.recycle_var).pack(side=LEFT)
-        ttk.Label(row2, textvariable=self.recycle_state, style="Value.TLabel").pack(side=LEFT, padx=(4, 0))
-
-        ttk.Label(
-            card,
-            text="启用系统回收站后，删除源文件和工作目录时会优先进入 Windows 回收站。",
-            style="Hint.TLabel",
-        ).pack(anchor="w", pady=(8, 0))
+        threshold_mode.pack(side=LEFT, padx=(0, 6))
+        ttk.Label(row2, text="目录数量超过").pack(side=LEFT)
+        ttk.Spinbox(row2, from_=1, to=1000000, width=5, textvariable=self.large_root_dir_threshold_var).pack(side=LEFT, padx=(4, 4))
+        ttk.Label(row2, text="时，手动确认是否继续探测，避免解压出来的非归档文件过多仍旧深度探测导致耗时过久").pack(side=LEFT)
 
         sync_bool_state(self.keep_source_var, self.keep_source_state)
         sync_bool_state(self.detect_polyglot_var, self.detect_polyglot_state)
         sync_bool_state(self.cleanup_var, self.cleanup_state)
         sync_bool_state(self.promote_output_var, self.promote_output_state)
         sync_bool_state(self.recycle_var, self.recycle_state)
+        sync_bool_state(self.prompt_large_root_var, self.prompt_large_root_state)
 
         pwd = ttk.Frame(card)
-        pwd.pack(fill=X, pady=(8, 0))
+        pwd.pack(fill=X, pady=(4, 0))
         ttk.Label(pwd, text="密码词典", width=12).pack(side=LEFT, anchor="n")
         pwd_text_wrap = ttk.Frame(pwd)
         pwd_text_wrap.pack(side=LEFT, fill=X, expand=True)
-        self.password_text = ScrolledText(pwd_text_wrap, height=5)
+        self.password_text = ScrolledText(pwd_text_wrap, height=3)
         self.password_text.pack(fill=X, expand=True)
         ttk.Label(
             card,
@@ -267,7 +282,7 @@ class DesktopExtractorApp:
         """Build the run button, save button, and progress row."""
 
         row = ttk.Frame(parent)
-        row.pack(fill=X, pady=(0, 10))
+        row.pack(fill=X, pady=(0, 4))
         self.run_btn = ttk.Button(row, text="开始解压", style="Primary.TButton", command=self._start_run)
         self.run_btn.pack(side=LEFT)
         ttk.Button(row, text="保存设置", command=self._save_settings).pack(side=LEFT, padx=(8, 0))
@@ -275,7 +290,7 @@ class DesktopExtractorApp:
         ttk.Label(row, textvariable=self.status).pack(side=RIGHT)
 
         progress_row = ttk.Frame(parent)
-        progress_row.pack(fill=X, pady=(0, 10))
+        progress_row.pack(fill=X, pady=(0, 4))
         self.progress_text = tk.StringVar(value="进度：0/0")
         ttk.Label(progress_row, textvariable=self.progress_text).pack(side=LEFT)
         self.progress = ttk.Progressbar(progress_row, mode="determinate", maximum=1, value=0)
@@ -284,15 +299,15 @@ class DesktopExtractorApp:
     def _build_log_card(self, parent: ttk.Frame) -> None:
         """Build the scrolling execution log panel."""
 
-        card = ttk.LabelFrame(parent, text="执行日志", style="Card.TLabelframe", padding=10)
+        card = ttk.LabelFrame(parent, text="执行日志", style="Card.TLabelframe", padding=8)
         card.pack(fill=BOTH, expand=True)
 
         toolbar = ttk.Frame(card)
-        toolbar.pack(fill=X, pady=(0, 8))
+        toolbar.pack(fill=X, pady=(0, 4))
         ttk.Checkbutton(toolbar, text="详细日志", variable=self.verbose_log_var).pack(side=LEFT)
         ttk.Button(toolbar, text="清空日志", command=self._clear_log).pack(side=RIGHT)
 
-        self.log = ScrolledText(card, height=10)
+        self.log = ScrolledText(card, height=12)
         self.log.pack(fill=BOTH, expand=True)
 
     def _bind_drag_drop(self) -> None:
@@ -326,18 +341,18 @@ class DesktopExtractorApp:
         if not dir_paths:
             messagebox.showwarning("提示", "当前为目录任务模式，只能拖入目录。")
             return
-        self._append_tasks([dir_paths[0]], expected_kind="dir")
-        self.multi_root_var.set("已加入 1 个目录")
+        self._append_tasks(dir_paths, expected_kind="dir")
+        self.multi_root_var.set(f"已加入 {len(dir_paths)} 个目录")
 
     def _on_mode_change(self) -> None:
         """Switch visible input controls when the task mode changes."""
 
         if self.mode_var.get() == "single":
-            self.single_row.pack(fill=X, pady=(8, 0))
+            self.single_row.pack(fill=X, pady=(5, 0))
             self.multi_row.pack_forget()
             self.drop_hint.set("支持拖拽：单文件模式只接收文件。")
         else:
-            self.multi_row.pack(fill=X, pady=(8, 0))
+            self.multi_row.pack(fill=X, pady=(5, 0))
             self.single_row.pack_forget()
             self.drop_hint.set("支持拖拽：目录任务模式只接收目录，目录选择为单选。")
 
@@ -394,7 +409,6 @@ class DesktopExtractorApp:
                 values=(
                     "是" if task.selected else "否",
                     kind_text,
-                    str(task.archive_count),
                     task.path,
                 ),
             )
@@ -411,21 +425,6 @@ class DesktopExtractorApp:
             if task.task_id == task_id:
                 task.selected = not task.selected
                 break
-        self._refresh_tasks()
-
-    def _select_all(self) -> None:
-        for task in self._tasks:
-            task.selected = True
-        self._refresh_tasks()
-
-    def _select_none(self) -> None:
-        for task in self._tasks:
-            task.selected = False
-        self._refresh_tasks()
-
-    def _invert_select(self) -> None:
-        for task in self._tasks:
-            task.selected = not task.selected
         self._refresh_tasks()
 
     def _clear_tasks(self) -> None:
@@ -479,6 +478,8 @@ class DesktopExtractorApp:
         try:
             for index, task in enumerate(tasks, start=1):
                 options = build_extract_options_from_settings(run_settings)
+                options.live_process_log_handler = self._emit_live_process_log
+                options.extracted_root_decision_handler = self._request_large_root_decision
                 plan = build_task_plan(task.path, options)
                 self._event_queue.put(("log", f"[{index}/{len(tasks)}] {task.path}"))
                 self._event_queue.put((
@@ -533,6 +534,15 @@ class DesktopExtractorApp:
             cleanup=self.cleanup_var.get(),
             promote_output=self.promote_output_var.get(),
             recycle=self.recycle_var.get(),
+            prompt_large_extracted_root=self.prompt_large_root_var.get(),
+            large_root_file_threshold=self.large_root_file_threshold_var.get(),
+            large_root_dir_threshold=self.large_root_dir_threshold_var.get(),
+            large_root_preview_limit=self.large_root_preview_limit_var.get(),
+            large_root_threshold_mode=(
+                "and"
+                if self.large_root_threshold_mode_var.get() == "并且"
+                else "or"
+            ),
             passwords=self._passwords(),
         )
 
@@ -585,9 +595,6 @@ class DesktopExtractorApp:
                         f"任务完成: {task.path} status={result.status} "
                         f"extracted={len(result.extracted_files)} next={result.next_action}"
                     )
-
-                    for line in self._iter_visible_process_logs(result):
-                        self._log(f"  {line}")
 
                     if result.errors:
                         for error in result.errors:
@@ -650,6 +657,13 @@ class DesktopExtractorApp:
                     message = str(payload)
                     if self.verbose_log_var.get() or self._should_show_live_log(message):
                         self._log(message)
+                elif event_name == "decision_request":
+                    request = payload
+                    self._handle_large_root_decision_request(request)
+                elif event_name == "process_log":
+                    entry = payload
+                    if self.verbose_log_var.get() or self._is_visible_process_log_level(entry.level, "WARNING"):
+                        self._log(f"  {entry.message}")
         except queue.Empty:
             pass
         finally:
@@ -664,17 +678,6 @@ class DesktopExtractorApp:
         """Clear the current live log panel."""
 
         self._logger.clear()
-
-    def _iter_visible_process_logs(self, result: EmbeddedExtractionResult) -> list[str]:
-        """Return process log lines that should be shown in the UI."""
-
-        if self.verbose_log_var.get():
-            return [entry.message for entry in result.process_log]
-        return [
-            entry.message
-            for entry in result.process_log
-            if self._is_visible_process_log_level(entry.level, "WARNING")
-        ]
 
     @staticmethod
     def _is_visible_process_log_level(level: str, min_level: str) -> bool:
@@ -715,6 +718,13 @@ class DesktopExtractorApp:
         self.cleanup_var.set(settings.cleanup)
         self.promote_output_var.set(settings.promote_output)
         self.recycle_var.set(settings.recycle)
+        self.prompt_large_root_var.set(settings.prompt_large_extracted_root)
+        self.large_root_file_threshold_var.set(settings.large_root_file_threshold)
+        self.large_root_dir_threshold_var.set(settings.large_root_dir_threshold)
+        self.large_root_preview_limit_var.set(settings.large_root_preview_limit)
+        self.large_root_threshold_mode_var.set(
+            "并且" if settings.large_root_threshold_mode == "and" else "或者"
+        )
         self.password_text.delete("1.0", END)
         self.password_text.insert("1.0", "\n".join(settings.passwords))
         self._on_mode_change()
@@ -724,6 +734,102 @@ class DesktopExtractorApp:
 
         save_ui_settings(self._settings_path, self._collect_current_settings())
         self._log("设置已保存")
+
+    def _request_large_root_decision(
+        self,
+        request: ExtractedRootDecisionRequest,
+    ) -> DeepProbeDecision:
+        """Block the worker until the UI answers a large-root prompt."""
+
+        decision_event = threading.Event()
+        self._current_decision_value = None
+        self._current_decision_event = decision_event
+        self._event_queue.put(("decision_request", request))
+        decision_event.wait()
+        self._current_decision_event = None
+        return self._current_decision_value or "skip_once"
+
+    def _emit_live_process_log(self, entry: ProcessLogEntry) -> None:
+        """Forward one live pipeline log entry into the UI event queue."""
+
+        self._event_queue.put(("process_log", entry))
+
+    def _handle_large_root_decision_request(
+        self,
+        request: ExtractedRootDecisionRequest,
+    ) -> None:
+        """Show a modal prompt for one large extracted root."""
+
+        lines = [
+            f"来源: {request.parent_archive_path}",
+            f"文件数: {request.file_count}",
+            f"目录树: {request.dir_count}",
+        ]
+        if request.sample_entries:
+            lines.append("内容预览:")
+            lines.extend(f"  - {entry}" for entry in request.sample_entries[:12])
+        self._current_decision_value = self._show_large_root_decision_dialog(
+            title="手动确认大目录",
+            message="\n".join(lines),
+        )
+        if self._current_decision_event is not None:
+            self._current_decision_event.set()
+
+    def _show_large_root_decision_dialog(
+        self,
+        *,
+        title: str,
+        message: str,
+    ) -> DeepProbeDecision:
+        """Show a custom modal dialog with three explicit decision buttons."""
+
+        result: dict[str, DeepProbeDecision] = {"value": "skip_once"}
+        dialog = tk.Toplevel(self.root)
+        dialog.title(title)
+        dialog.transient(self.root)
+        dialog.resizable(False, False)
+        dialog.configure(bg="#eef2f6")
+        dialog.grab_set()
+
+        container = ttk.Frame(dialog, padding=12)
+        container.pack(fill=BOTH, expand=True)
+
+        ttk.Label(
+            container,
+            text=message,
+            justify=LEFT,
+            anchor="w",
+        ).pack(fill=X)
+
+        button_row = ttk.Frame(container)
+        button_row.pack(fill=X, pady=(10, 0))
+
+        def _finish(decision: DeepProbeDecision) -> None:
+            result["value"] = decision
+            dialog.destroy()
+
+        ttk.Button(
+            button_row,
+            text="继续",
+            style="Primary.TButton",
+            command=lambda: _finish("continue"),
+        ).pack(side=LEFT)
+        ttk.Button(
+            button_row,
+            text="跳过",
+            command=lambda: _finish("skip_once"),
+        ).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(
+            button_row,
+            text="当前任务默认跳过",
+            command=lambda: _finish("skip_default"),
+        ).pack(side=RIGHT)
+
+        dialog.protocol("WM_DELETE_WINDOW", lambda: _finish("skip_once"))
+        dialog.update_idletasks()
+        dialog.geometry(f"+{self.root.winfo_rootx() + 120}+{self.root.winfo_rooty() + 120}")
+        dialog.wait_window()
+        return result["value"]
 
 
 def launch_desktop_gui() -> None:

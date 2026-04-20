@@ -17,6 +17,8 @@ def mark_success(
     state: PipelineState,
     evidence: FileEvidence,
     attempt: ArchiveAttemptResult,
+    *,
+    skip_recursive_scan: bool = False,
 ) -> None:
     """记录一次成功解压，并把产物加入下一轮扫描。"""
 
@@ -27,6 +29,9 @@ def mark_success(
         attempt.output_dir,
         parent_path=evidence.source_path,
     )
+    if skip_recursive_scan:
+        state.skipped_extracted_roots.add(os.path.abspath(attempt.output_dir))
+        state.log_info(f"[recursive] skip recursive scan for extracted root: {attempt.output_dir}")
     state.root_candidates.pop(evidence.source_path, None)
     state.unresolved_candidates.pop(evidence.source_path, None)
     state.password_failed_candidates.pop(evidence.source_path, None)

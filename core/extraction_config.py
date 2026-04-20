@@ -31,6 +31,26 @@ def normalize_embedded_config(
         normalized.multipart_bootstrap_count,
         int(normalized.multipart_max_candidates),
     )
+    normalized.extracted_root_fast_track_file_threshold = max(
+        1,
+        int(normalized.extracted_root_fast_track_file_threshold),
+    )
+    normalized.extracted_root_fast_track_dir_threshold = max(
+        1,
+        int(normalized.extracted_root_fast_track_dir_threshold),
+    )
+    normalized.prompt_on_large_extracted_root = bool(
+        normalized.prompt_on_large_extracted_root
+    )
+    normalized.extracted_root_threshold_mode = (
+        "and"
+        if str(normalized.extracted_root_threshold_mode).strip().lower() == "and"
+        else "or"
+    )
+    normalized.extracted_root_preview_limit = max(
+        0,
+        int(normalized.extracted_root_preview_limit),
+    )
     normalized.force_probe_extensions = tuple(
         extension.lower().lstrip(".")
         for extension in normalized.force_probe_extensions

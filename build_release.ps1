@@ -17,6 +17,38 @@ function Get-ProjectVersion {
     return $match.Groups[1].Value
 }
 
+function New-ReleaseZip {
+    param(
+        [string]$SourceDirectory,
+        [string]$DestinationPath
+    )
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+    $lastError = $null
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        try {
+            if (Test-Path -LiteralPath $DestinationPath) {
+                Remove-Item -LiteralPath $DestinationPath -Force
+            }
+
+            [System.IO.Compression.ZipFile]::CreateFromDirectory(
+                $SourceDirectory,
+                $DestinationPath,
+                [System.IO.Compression.CompressionLevel]::Optimal,
+                $true
+            )
+            return
+        }
+        catch {
+            $lastError = $_
+            Start-Sleep -Milliseconds (300 * $attempt)
+        }
+    }
+
+    throw $lastError
+}
+
 $version = Get-ProjectVersion
 $distRoot = Join-Path $projectRoot "dist"
 $builtAppDir = Join-Path $distRoot "ArcWeaver"
@@ -58,7 +90,7 @@ foreach ($name in $releaseDocs) {
     }
 }
 
-Compress-Archive -LiteralPath $stageDir -DestinationPath $zipPath -Force
+New-ReleaseZip -SourceDirectory $stageDir -DestinationPath $zipPath
 
 Write-Output "RELEASE_DIR: $stageDir"
 Write-Output "RELEASE_ZIP: $zipPath"

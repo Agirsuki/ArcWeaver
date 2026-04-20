@@ -22,6 +22,11 @@ class UiSettings:
     cleanup: bool = False
     promote_output: bool = True
     recycle: bool = True
+    prompt_large_extracted_root: bool = True
+    large_root_file_threshold: int = 64
+    large_root_dir_threshold: int = 12
+    large_root_threshold_mode: str = "and"
+    large_root_preview_limit: int = 12
     passwords: list[str] = field(default_factory=list)
 
 
@@ -51,6 +56,49 @@ def load_ui_settings(settings_path: Path) -> UiSettings:
         cleanup=bool(raw_data.get("cleanup", defaults.cleanup)),
         promote_output=bool(raw_data.get("promote_output", defaults.promote_output)),
         recycle=bool(raw_data.get("recycle", defaults.recycle)),
+        prompt_large_extracted_root=bool(
+            raw_data.get(
+                "prompt_large_extracted_root",
+                defaults.prompt_large_extracted_root,
+            )
+        ),
+        large_root_file_threshold=max(
+            1,
+            int(
+                raw_data.get(
+                    "large_root_file_threshold",
+                    defaults.large_root_file_threshold,
+                )
+            ),
+        ),
+        large_root_dir_threshold=max(
+            1,
+            int(
+                raw_data.get(
+                    "large_root_dir_threshold",
+                    defaults.large_root_dir_threshold,
+                )
+            ),
+        ),
+        large_root_threshold_mode=(
+            "and"
+            if str(
+                raw_data.get(
+                    "large_root_threshold_mode",
+                    defaults.large_root_threshold_mode,
+                )
+            ).strip().lower() == "and"
+            else "or"
+        ),
+        large_root_preview_limit=max(
+            0,
+            int(
+                raw_data.get(
+                    "large_root_preview_limit",
+                    defaults.large_root_preview_limit,
+                )
+            ),
+        ),
         passwords=_normalize_passwords(raw_data.get("passwords", defaults.passwords)),
     )
 
@@ -67,6 +115,11 @@ def save_ui_settings(settings_path: Path, settings: UiSettings) -> None:
         "cleanup": settings.cleanup,
         "promote_output": settings.promote_output,
         "recycle": settings.recycle,
+        "prompt_large_extracted_root": settings.prompt_large_extracted_root,
+        "large_root_file_threshold": settings.large_root_file_threshold,
+        "large_root_dir_threshold": settings.large_root_dir_threshold,
+        "large_root_threshold_mode": settings.large_root_threshold_mode,
+        "large_root_preview_limit": settings.large_root_preview_limit,
         "passwords": list(settings.passwords),
     }
     settings_path.write_text(
@@ -108,6 +161,11 @@ def build_extract_options_from_settings(settings: UiSettings) -> ExtractOptions:
         output_dir_name="unzipped",
         working_dir_name=".complex_unzip_work",
         workspace_suffix_length=6,
+        prompt_on_large_extracted_root=settings.prompt_large_extracted_root,
+        extracted_root_fast_track_file_threshold=settings.large_root_file_threshold,
+        extracted_root_fast_track_dir_threshold=settings.large_root_dir_threshold,
+        extracted_root_threshold_mode=settings.large_root_threshold_mode,
+        extracted_root_preview_limit=settings.large_root_preview_limit,
     )
 
 
